@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package gesture;
+
+message ImageRequest {
+  bytes image = 1;
+}
+
+message DetectionResponse {
+  repeated float landmarks = 1;
+}
+
+service GestureService {
+  rpc DetectHand(ImageRequest) returns (DetectionResponse);
+}

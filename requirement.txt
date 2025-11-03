@@ -1,0 +1,8 @@
+# 仅包含本地运行所需依赖（不包括 Colab 环境依赖）
+
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+grpcio>=1.58.0
+grpcio-tools>=1.58.0
+numpy>=1.21.0
+psutil>=5.9.0
