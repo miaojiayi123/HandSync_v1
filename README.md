@@ -155,7 +155,7 @@ python client/client.py
 
 ---
 
-**项目地址：** [https://github.com/miaojiayi123/HandSync](https://github.com/miaojiayi123/HandSync) 
+**项目地址：** [https://github.com/miaojiayi123/HandSync_v1](https://github.com/miaojiayi123/HandSync_v1) 
 
 **作者：** 缪家逸
 
