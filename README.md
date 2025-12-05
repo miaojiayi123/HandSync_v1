@@ -40,7 +40,7 @@ HandSync_v1/
 
 ### 1\. 安装 Python 依赖
 
-建议使用 Python 3.8 或更高版本。
+建议使用 Python 3.10 或更高版本。
 
 ```bash
 pip install opencv-python mediapipe grpcio grpcio-tools numpy psutil
