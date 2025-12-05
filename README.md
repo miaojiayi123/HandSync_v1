@@ -1,164 +1,213 @@
-# 动态分区手势识别系统
 
----
+# HandSync: 智能动态分区手势识别系统
 
-## 项目概述
+### (Smart Dynamic Partitioning Hand Gesture Recognition System)
 
-本项目实现了一个 **智能动态分区手势识别系统**，支持以下三种部署模式：
+   
 
-| 模式 | 说明 | 适用场景 |
-|------|------|----------|
-| **纯本地部署** | 全部在本地运行，无网络依赖 | 离线环境、隐私保护 |
-| **纯网页部署** | 浏览器访问，无需安装 Python | 教学演示、远程展示 |
-| **gRPC 动态分区** | 云端推理 + 本地 fallback | 边缘设备、弱网环境 |
+## 📖 项目简介 (Introduction)
 
----
+本项目是 **软件体系结构 (Software Architecture)** 课程关于移动云计算的研究实践。
 
-## 环境准备
+项目针对计算密集型应用（手势识别）在移动端运行时的性能瓶颈，设计并实现了一个基于 **gRPC** 的 **计算卸载（Computation Offloading）** 系统。系统采用 **异步双缓冲（Asynchronous Double-Buffering）** 架构，能够根据网络状况（RTT 延迟）在 **本地 (Local)** 和 **边缘服务器 (Edge Server)** 之间动态迁移计算任务，实现“云边端”协同计算。
 
-### 1. 安装依赖
+-----
+
+## 📂 项目结构 (Directory Structure)
+
+```text
+HandSync_v1/
+├── local/
+│   └── local_gesture.py      # [基准] 纯本地全功能识别 (Baseline)
+├── proto/
+│   └── gesture.proto         # [协议] gRPC 通信协议定义文件
+├── server/
+│   ├── run_server.py         # [服务端] 边缘服务端入口 (gRPC Server)
+│   ├── async_client.py       # [客户端] 动态分区客户端 (原 async_sever.py)
+│   ├── gesture_pb2.py        # [自动生成] 协议代码
+│   └── gesture_pb2_grpc.py   # [自动生成] gRPC 代码
+├── web/
+│   └── index.html            # [网页端] 纯网页版 (WebAssembly)
+├── requirements.txt          # 依赖列表
+└── README.md                 # 项目说明文档
+```
+
+> **注意**：`server/` 文件夹中同时包含了服务端代码 (`run_server.py`) 和客户端代码 (`async_client.py`)，这是为了方便两者共享生成的协议文件 (`_pb2.py`)。
+
+-----
+
+## 🛠️ 环境准备 (Prerequisites)
+
+### 1\. 安装 Python 依赖
+
+建议使用 Python 3.8 或更高版本。
 
 ```bash
 pip install opencv-python mediapipe grpcio grpcio-tools numpy psutil
 ```
 
-### 2. 生成协议文件（只需一次）
+### 📦 安装命令
+
+保存文件后，在终端运行：
 
 ```bash
-# 在 proto/ 目录下执行
-python -m grpc_tools.protoc -I. --python_out=../server --grpc_python_out=../server gesture.proto
+pip install -r requirements.txt
 ```
 
----
-
-# 部署模式一：**纯本地部署**（零网络）
-
-### 步骤
-
-1. **运行本地识别程序**
+建议使用国内镜像源以加快速度（如果你在中国）：
 
 ```bash
-python client/local_only.py
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-2. **效果**
-   - 摄像头实时识别手势
-   - 无网络依赖
-   - FPS较高
+### 2\. 编译 gRPC 协议 (首次运行或协议修改后执行)
 
----
-
-# 部署模式二：**纯网页部署**（浏览器访问）
-
-### 步骤
-
-1. **启动本地 Web 服务器**
+由于代码移动到了不同文件夹，请在 **项目根目录** 下执行以下命令，将 `proto/` 中的协议编译并输出到 `server/` 文件夹中：
 
 ```bash
-# 方法1：Python 简单服务器
-python -m http.server 8000
-
-# 方法2：VSCode Live Server
+# 在 HandSync_v1 根目录下执行
+python -m grpc_tools.protoc -Iproto --python_out=server --grpc_python_out=server proto/gesture.proto
 ```
 
-2. **浏览器访问**
+-----
 
-```
-http://localhost:8000
-```
+## 🚀 部署模式指南
 
-3. **效果**
-   - 浏览器摄像头实时识别
-   - 无需安装 Python
+本项目支持三种运行模式，分别对应实验报告的三个部分。
 
----
+### 🟢 模式一：纯本地部署 (Part A - Baseline)
 
-# 部署模式三：**gRPC 动态分区**（云端 + 本地 fallback）
+> **场景**：完全离线，作为性能对比的基准线。
 
-### 步骤 1：启动云端服务（Colab）
+1.  **启动命令**：
+    ```bash
+    # 在根目录下执行
+    python local/local_gesture.py
+    ```
+2.  **预期效果**：
+      * 完全依赖本地 CPU，CPU 占用率较高。
+      * 屏幕显示绿色 `Mode: PURE LOCAL`。
 
-1. 打开 [Google Colab](https://colab.research.google.com/)
-2. 上传 `server/` 目录下（`gesture_pb2.py`、`gesture_pb2_grpc.py`）
-3. 单元格输入并执行
-```bash
-!pip install mediapipe opencv-python grpcio grpcio-tools numpy
-````
-3. 新的一个单元格粘贴并运行 `server.py`
+### 🔵 模式二：纯网页部署 (Part B - Web Demo)
 
-输出：
+> **场景**：无需安装环境，基于 MediaPipe WebAssembly 技术。
+
+1.  **进入目录并启动服务器**：
+    ```bash
+    cd web
+    python -m http.server 8000
+    ```
+2.  **访问地址**：
+    打开 Chrome 浏览器访问 `http://localhost:8000`。
+3.  **预期效果**：
+      * 显示 `Mode: PURE WEB (JS)`。
+      * 页面实时展示主线程负载率 (Load)。
+
+### 🟠 模式三：gRPC 动态分区 (Part C - Core)
+
+> **场景**：这是本项目的**核心**，展示移动端与服务器的协同工作。支持 **“单机模拟”** 和 **“双机局域网”** 两种拓扑结构。
+
+#### 场景 A：单机闭环开发 (Single Machine)
+
+> **适用**：开发调试、独自一人演示。
+
+1.  **启动服务端**：
+    打开终端 1，运行：
+    ```bash
+    python server/run_server.py
+    ```
+2.  **配置客户端**：
+    打开 `server/async_client.py`，确保 IP 为 `localhost`：
+    ```python
+    SERVER_IP = 'localhost'
+    SERVER_PORT = '50051'
+    ```
+3.  **启动客户端**：
+    打开终端 2，运行：
+    ```bash
+    python server/async_client.py
+    ```
+
+-----
+
+#### 场景 B：双机局域网演示 (Dual Machine LAN)
+
+> **适用**：**最终答辩演示**。模拟真实的边缘计算环境（一台电脑做 Server，一台电脑做 Client）。
+
+1.  **网络准备**：
+
+      * 确保两台电脑连接到**同一个 WiFi** (或手机热点)。
+      * 假设 **电脑 A** 是服务器，**电脑 B** 是客户端。
+
+2.  **启动服务端 (电脑 A)**：
+    运行 `python server/run_server.py`。
+    *终端会显示局域网 IP，例如 `192.168.1.105`，请记下它。*
+
+3.  **配置客户端 (电脑 B)**：
+    打开电脑 B 上的 `server/async_client.py`，修改 IP：
+
+    ```python
+    SERVER_IP = '192.168.1.105'  # 填入电脑 A 的 IP
+    SERVER_PORT = '50051'
+    ```
+
+4.  **启动客户端 (电脑 B)**：
+    运行 `python server/async_client.py`。
+
+5.  **验证动态切换 (Demo 环节)**：
+
+      * **正常状态**：客户端显示橙色 `Mode: CLOUD (Remote)`。
+      * **故障模拟**：断开电脑 A 的网络或关闭 Server。
+      * **自适应切换**：客户端瞬间切换为绿色 `Mode: LOCAL (Fallback)`，系统不崩溃。
+      * **恢复**：重启 Server，客户端自动切回 `CLOUD` 模式。
+
+-----
+
+## 📊 性能量化报告
+
+所有 Python 脚本在按下 `ESC` 或 `q` 退出时，都会自动计算并打印详细的性能报告。
+
+**示例输出：**
+
 ```text
-协议文件加载成功
-gRPC 服务器启动成功
-tcp://abcd-34-41-38-3.a.free.pinggy.link:12345
-复制到 client.py: CLOUD_ADDR = 'abcd-34-41-38-3.a.free.pinggy.link:12345'
+======================================================================
+📢 软件体系结构 - 动态分区性能测试报告
+======================================================================
+总运行时间     : 65.40 秒
+总处理帧数     : 1850 帧
+平均处理延迟   : 42.15 ms  (含网络传输+云端推理)
+平均 UI FPS    : 29.5      (异步架构保证流畅度)
+----------------------------------------------------------------------
+平均 CPU 占用  : 12.5%     (云端卸载后显著降低本地负载)
+平均 内存 占用 : 110.2 MB
+估算能耗(10min): 45.2 mAh  (相比纯本地节省约 40% 电量)
+======================================================================
 ```
 
-### 步骤 2：运行本地客户端
+-----
 
-1. **修改 `client.py` 中的地址（启动server脚本后输出的地址）**
+## 📧 联系与反馈
 
-```python
-CLOUD_ADDR = "abcd-34-41-38-3.a.free.pinggy.link:12345"  # 替换为你的地址
-```
+  * **Author**: 缪家逸 (Miaojiayi)
+  * **Course**: 软件体系结构 2025 Fall
+  * **Date**: 2025-12-04
+  * **Github**: [https://github.com/miaojiayi123/HandSync\_v1](https://github.com/miaojiayi123/HandSync_v1)
 
-2. **运行客户端**
+-----
+
+*Developed for Software Architecture Course Assignment.*
+
+
+### 📦 安装命令
+
+保存文件后，在终端运行：
 
 ```bash
-python client/client.py
+pip install -r requirements.txt
 ```
 
-3. **效果**
-   - 正常网络：`Mode: 云端 gRPC`（黄色文字）
-   - 网络延迟 >100ms：自动切 `本地模式`（绿色文字）
-   - 断网：强制本地，丝滑运行
+建议使用国内镜像源以加快速度（如果你在中国）：
 
----
-
-## 性能报告（按 ESC 退出后自动打印）
-
-```text
-======================================================================
-                    动态分区性能报告
-======================================================================
-总运行时间     : 45.23 秒
-总帧数         : 1120
-平均延迟       : 40.38 ms
-平均 FPS       : 24.8
-平均 CPU 占用  : 32.1%
-平均内存占用   : 185.4 MB
-估算能耗 (10min): 128.4 mAh
-峰值 FPS       : 31.2
-最低 FPS       : 18.5
-最终模式       : 云端 gRPC
-======================================================================
+```bash
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
-
----
-
-## 常见问题
-
-| 问题 | 解决方案 |
-|------|----------|
-| `ModuleNotFoundError: No module named 'gesture_pb2'` | 重新生成 `.py` 文件 |
-| `UNAVAILABLE: Socket closed` | 重启 `server.py` 获取新地址 |
-| 手上无关键点 | 确保 `landmarks` 是 `float`，JPEG 质量 ≥80 |
-| 网页摄像头无权限 | 允许浏览器访问摄像头 |
-| `Descriptor object is not callable` | 使用 `DetectionResponse()` 而非 `_DETECTIONRESPONSE()` |
-
----
-
-## 贡献与反馈
-
-- **Star 本项目**
-- **提交 Issue**
-- **PR 欢迎优化**
-
----
-
-**项目地址：** [https://github.com/miaojiayi123/HandSync_v1](https://github.com/miaojiayi123/HandSync_v1) 
-
-**作者：** 缪家逸
-
-**日期：** 2025-11-03
-
----

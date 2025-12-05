@@ -1,0 +1,20 @@
+# 图像处理与计算机视觉
+opencv-python>=4.8.0
+
+# Google MediaPipe 机器学习框架 (手势识别核心)
+mediapipe>=0.10.9
+
+# gRPC 通信框架 (运行时)
+grpcio>=1.60.0
+
+# gRPC 编译工具 (用于生成 _pb2.py 文件)
+grpcio-tools>=1.60.0
+
+# Protocol Buffers (数据序列化，通常随 gRPC 安装，但显式指定更稳妥)
+protobuf>=4.25.0
+
+# 数值计算库 (OpenCV 和 MediaPipe 的依赖)
+numpy>=1.24.0
+
+# 系统性能监控 (用于获取 CPU 和 内存占用率)
+psutil>=5.9.0

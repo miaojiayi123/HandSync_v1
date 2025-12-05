@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MediaPipe Web 手势识别 + 性能监测 (Part B Web Mode)</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14"></script>
+
+  <style>
+    body { margin: 0; font-family: 'Consolas', 'Courier New', monospace; background: #111; color: white; overflow: hidden; }
+    #container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+    #video { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; }
+    #canvas { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+
+    /* 悬浮信息面板 */
+    #info-panel {
+      position: absolute; top: 20px; left: 20px; z-index: 10;
+      background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px;
+      border-left: 5px solid #00FF00; /* 本地模式绿色 */
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      font-size: 16px; line-height: 1.6; pointer-events: none;
+    }
+
+    .metric-label { color: #aaa; }
+    .metric-value { color: #fff; font-weight: bold; }
+    .gesture-text { font-size: 24px; color: #FFD700; margin-top: 10px; font-weight: bold; }
+
+    /* 报告弹窗 */
+    #report-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.95); z-index: 100;
+      flex-direction: column; justify-content: center; align-items: center;
+    }
+    #report-content {
+      background: #222; padding: 40px; border-radius: 10px; border: 1px solid #444;
+      font-family: 'Consolas', monospace; white-space: pre; color: #0f0;
+      font-size: 14px; line-height: 1.5; box-shadow: 0 0 20px rgba(0,255,0,0.2);
+    }
+    .btn {
+      margin-top: 20px; padding: 10px 20px; background: #444; color: white; border: none;
+      cursor: pointer; font-size: 16px; border-radius: 5px;
+    }
+    .btn:hover { background: #666; }
+  </style>
+</head>
+<body>
+
+<div id="container">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <div id="info-panel">
+    <div><span class="metric-label">Mode:</span> <span style="color: #00FF00;">PURE WEB (JS)</span></div>
+    <div><span class="metric-label">FPS:</span> <span id="fps-val" class="metric-value">0</span></div>
+    <div><span class="metric-label">Latency:</span> <span id="lat-val" class="metric-value">0</span> ms</div>
+    <div><span class="metric-label">Est. Load:</span> <span id="cpu-val" class="metric-value">0</span>%</div>
+    <div id="gesture-val" class="gesture-text">Waiting...</div>
+    <div style="font-size: 12px; color: #666; margin-top:5px;">按 ESC 结束并生成报告</div>
+  </div>
+</div>
+
+<div id="report-overlay">
+  <div id="report-content">正在计算报告...</div>
+  <button class="btn" onclick="location.reload()">重新开始</button>
+</div>
+
+<script type="module">
+  import {
+    FilesetResolver,
+    HandLandmarker,
+    DrawingUtils
+  } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const reportOverlay = document.getElementById("report-overlay");
+  const reportContent = document.getElementById("report-content");
+
+  // UI 元素
+  const uiFps = document.getElementById("fps-val");
+  const uiLat = document.getElementById("lat-val");
+  const uiCpu = document.getElementById("cpu-val"); // JS 主线程负载
+  const uiGesture = document.getElementById("gesture-val");
+
+  let handLandmarker = undefined;
+  let runningMode = "VIDEO";
+  let lastVideoTime = -1;
+  let startTime = 0;
+
+  // 性能统计
+  let frameCount = 0;
+  let totalRunTime = 0;
+  let fpsHistory = [];
+  let latencyHistory = [];
+  let loadHistory = [];
+  let memoryHistory = [];
+  let isRunning = true;
+
+  // ==================== 1. 初始化 MediaPipe ====================
+  const createHandLandmarker = async () => {
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+        delegate: "GPU"
+      },
+      runningMode: runningMode,
+      numHands: 1
+    });
+    startWebcam();
+  };
+  createHandLandmarker();
+
+  // ==================== 2. 摄像头控制 ====================
+  function startWebcam() {
+    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+      video.srcObject = stream;
+      video.addEventListener("loadeddata", predictWebcam);
+      startTime = performance.now();
+    });
+  }
+
+  // ==================== 3. 核心：几何手势分类 (与 Python 逻辑一致) ====================
+  function classifyGesture(landmarks) {
+    if (!landmarks || landmarks.length < 21) return "Unknown";
+
+    // MediaPipe JS 关键点对象是 {x, y, z}
+    // 距离计算 (无需开方，比较平方即可)
+    const distSq = (p1, p2) => (p1.x - p2.x)**2 + (p1.y - p2.y)**2;
+
+    const wrist = landmarks[0];
+    const fingersUp = [false, false, false, false, false];
+
+    // 指尖索引: 4, 8, 12, 16, 20
+    // 关节索引: 3, 6, 10, 14, 18 (用 PIP 比较更稳)
+    // 注意：JS版 landmarks 是归一化坐标，直接算欧氏距离即可
+
+    // 1. 食指到小指 (Index to Pinky)
+    const tips = [8, 12, 16, 20];
+    const pips = [6, 10, 14, 18];
+    for(let i=0; i<4; i++) {
+        if (distSq(landmarks[tips[i]], wrist) > distSq(landmarks[pips[i]], wrist)) {
+            fingersUp[i+1] = true;
+        }
+    }
+
+    // 2. 拇指 (Thumb) - 比较 Tip 到 IndexMCP vs IP 到 IndexMCP
+    const thumbTip = landmarks[4];
+    const thumbIp = landmarks[3];
+    const indexMcp = landmarks[5];
+    if (distSq(thumbTip, indexMcp) > distSq(thumbIp, indexMcp)) {
+        fingersUp[0] = true;
+    }
+
+    // 3. 规则匹配
+    const upCount = fingersUp.filter(Boolean).length;
+
+    if (upCount === 0) return "Rock (Fist)";
+    if (upCount === 5) return "Paper (Palm)";
+    if (upCount === 2 && fingersUp[1] && fingersUp[2]) return "Scissors";
+    if (upCount === 1 && fingersUp[1]) return "One";
+    if (upCount === 1 && fingersUp[0]) return "Good / Like";
+    if (upCount === 3 && fingersUp[1] && fingersUp[2] && fingersUp[3]) return "Three";
+    if (upCount === 2 && fingersUp[0] && fingersUp[4]) return "Call Me";
+
+    return "Unknown";
+  }
+
+  // ==================== 4. 主循环 ====================
+  async function predictWebcam() {
+    if (!isRunning) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    let now = performance.now();
+    let startTimeLoop = now;
+
+    if (handLandmarker && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+
+      // 执行推理
+      const results = handLandmarker.detectForVideo(video, now);
+
+      // 计算推理延迟
+      const latency = performance.now() - startTimeLoop;
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const drawingUtils = new DrawingUtils(ctx);
+
+      let gestureName = "Waiting...";
+
+      if (results.landmarks && results.landmarks.length > 0) {
+        for (const landmarks of results.landmarks) {
+          // 绘制骨架
+          drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
+            color: "#00FF00",
+            lineWidth: 3
+          });
+          drawingUtils.drawLandmarks(landmarks, {
+            color: "#FF0000",
+            lineWidth: 1
+          });
+
+          // 调用分类器
+          gestureName = classifyGesture(landmarks);
+        }
+      }
+      ctx.restore();
+
+      // 更新 UI 数据
+      // FPS 计算
+      const delta = now - (window.lastFrameTime || now);
+      window.lastFrameTime = now;
+      const fps = 1000 / (delta || 1);
+
+      // 负载估算 (处理时间 / 帧间隔)
+      const load = Math.min((latency / 16.6) * 100, 100);
+
+      // 内存 (仅 Chrome)
+      let memory = 0;
+      if (performance.memory) {
+        memory = performance.memory.usedJSHeapSize / 1024 / 1024;
+      }
+
+      // 记录历史数据 (略过前30帧不稳定期)
+      if (frameCount > 30) {
+        fpsHistory.push(fps);
+        latencyHistory.push(latency);
+        loadHistory.push(load);
+        if(memory > 0) memoryHistory.push(memory);
+      }
+
+      // 实时显示
+      uiFps.innerText = fps.toFixed(0);
+      uiLat.innerText = latency.toFixed(1);
+      uiCpu.innerText = load.toFixed(0);
+      uiGesture.innerText = gestureName;
+
+      // 手势变色
+      if(["Rock", "Paper", "Scissors"].some(x => gestureName.includes(x))) {
+          uiGesture.style.color = "#FF0000"; // 红色高亮
+      } else {
+          uiGesture.style.color = "#FFD700"; // 金色
+      }
+
+      frameCount++;
+    }
+
+    window.requestAnimationFrame(predictWebcam);
+  }
+
+  // ==================== 5. 生成报告 ====================
+  function generateReport() {
+    isRunning = false;
+    reportOverlay.style.display = "flex";
+
+    const totalTime = (performance.now() - startTime) / 1000;
+
+    // 计算平均值
+    const avg = arr => arr.length ? arr.reduce((a,b)=>a+b)/arr.length : 0;
+    const avgFps = avg(fpsHistory);
+    const avgLat = avg(latencyHistory);
+    const avgLoad = avg(loadHistory);
+    const avgMem = avg(memoryHistory);
+
+    // 估算能耗 (JS Load 模拟 CPU %)
+    const runMinutes = totalTime / 60;
+    // 假设 Web 效率较低，系数设为 0.15
+    const estMah = avgLoad * runMinutes * 0.15;
+    const power10min = runMinutes > 0 ? estMah * (10/runMinutes) : 0;
+
+    const reportText = `
+============================================================
+📊 软件体系结构 - Web端性能基准报告 (JS Mode)
+============================================================
+总运行时间     : ${totalTime.toFixed(2)} 秒
+总处理帧数     : ${frameCount} 帧
+平均 FPS       : ${avgFps.toFixed(1)} (受限于浏览器主线程)
+------------------------------------------------------------
+平均处理延迟   : ${avgLat.toFixed(2)} ms
+主线程负载     : ${avgLoad.toFixed(1)}% (模拟 CPU 占用)
+JS堆内存占用   : ${avgMem.toFixed(1)} MB ${!performance.memory ? '(浏览器不支持)' : ''}
+估算能耗(10min): ${power10min.toFixed(1)} mAh
+============================================================
+    `;
+
+    reportContent.innerText = reportText;
+    console.log(reportText);
+  }
+
+  // 监听 ESC 键
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") generateReport();
+  });
+
+</script>
+</body>
+</html>

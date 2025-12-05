@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from server import gesture_pb2 as gesture__pb2
+import gesture_pb2 as gesture__pb2
 
 
 class GestureServiceStub(object):
