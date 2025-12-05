@@ -43,7 +43,7 @@ HandSync_v1/
 建议使用 Python 3.10 或更高版本。
 
 ```bash
-pip install opencv-python mediapipe grpcio grpcio-tools numpy psutil
+pip install grpcio grpcio-tools protobuf opencv-python mediapipe numpy psutil -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 ### 📦 安装命令
